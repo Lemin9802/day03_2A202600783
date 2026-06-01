@@ -50,6 +50,16 @@ def parse_args():
         help="Maximum ReAct reasoning steps.",
     )
 
+    parser.add_argument(
+        "--agent-version",
+        choices=["v1", "v2"],
+        default="v1",
+        help=(
+            "Agent version to run. "
+            "Use v1 for baseline ReAct agent, v2 for prompt-improved agent."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -65,12 +75,14 @@ def main():
         llm=llm,
         tools=TOOLS,
         max_steps=args.max_steps,
+        agent_version=args.agent_version,
     )
 
     tool_names = [tool["name"] for tool in TOOLS]
 
     print("\n=== RUN CONFIG ===")
     print(f"Provider model: {llm.model_name}")
+    print(f"Agent version: {args.agent_version}")
     print(f"Available tools: {', '.join(tool_names)}")
     print(f"Max steps: {args.max_steps}")
     print(f"Query: {args.query}")

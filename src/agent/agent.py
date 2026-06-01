@@ -9,13 +9,30 @@ from src.telemetry.metrics import tracker
 
 class ReActAgent:
     """
-    A ReAct-style Agent v1 that follows the Thought-Action-Observation loop.
+    A ReAct-style Agent that follows the Thought-Action-Observation loop.
+
+    Agent v1:
+    - Basic ReAct loop
+    - Tool execution
+    - Final Answer detection
+
+    Agent v2:
+    - Adds stricter final-answer wording rules
+    - Improves Vietnamese output consistency
+    - Improves evaluator-friendly budget/coupon wording
     """
 
-    def __init__(self, llm: LLMProvider, tools: List[Dict[str, Any]], max_steps: int = 5):
+    def __init__(
+        self,
+        llm: LLMProvider,
+        tools: List[Dict[str, Any]],
+        max_steps: int = 5,
+        agent_version: str = "v1",
+    ):
         self.llm = llm
         self.tools = tools
         self.max_steps = max_steps
+        self.agent_version = agent_version
         self.history = []
 
     def get_system_prompt(self) -> str:
@@ -26,8 +43,8 @@ class ReActAgent:
             ]
         )
 
-        return f"""
-You are EduCourse ReAct Agent v1, a course registration assistant.
+        base_prompt = f"""
+You are EduCourse ReAct Agent {self.agent_version}, a course registration assistant.
 
 You have access to the following tools:
 {tool_descriptions}
@@ -43,23 +60,38 @@ Observation: tool result
 Then continue with Thought/Action if more tool information is needed.
 
 When you have enough information, stop using tools and respond with:
-Final Answer: your final response to the user.
+Final Answer: your final response to the user in Vietnamese.
 
 Rules:
 - Use only the tools listed above.
 - Use exactly one Action per step.
 - Do not invent tool names.
 - Do not invent Observation results.
+- Do not write Observation yourself. Observation will be provided only by the system after a tool call.
+- Do not include Final Answer in the same response as an Action.
 - Action arguments must be valid JSON inside parentheses.
 - Before recommending a course as available, check class slots.
 - If slots_left is 0, do not say the class is available.
 - If a coupon is invalid, explain that the coupon is invalid and no discount is applied.
-- Answer every part of the user's question in the Final Answer. Preserve relevant
-  tool findings such as an invalid coupon even if another lookup also has no matches.
+- Answer every part of the user's question in the Final Answer.
+- Preserve relevant tool findings such as an invalid coupon even if another lookup also has no matches.
 - Final answers should be clear and use VND when discussing tuition.
-- Do not write Observation yourself. Observation will be provided only by the system after a tool call.
-- Do not include Final Answer in the same response as an Action.
+- Always write the Final Answer in Vietnamese.
+- If the user asks in Vietnamese, answer in Vietnamese.
 """.strip()
+
+        if self.agent_version == "v2":
+            base_prompt += """
+
+Additional Agent v2 rules:
+- If the user mentions a budget and the final tuition is higher than that budget, explicitly say "vượt ngân sách" in Vietnamese.
+- If the final tuition is lower than or equal to the budget, explicitly say "phù hợp với ngân sách" in Vietnamese.
+- When a coupon is invalid, explicitly say "mã giảm giá không hợp lệ" and "không có giảm giá được áp dụng".
+- Use evaluator-friendly Vietnamese wording for budget comparison.
+- Keep the Final Answer concise and in Vietnamese.
+""".strip()
+
+        return base_prompt
 
     def run(self, user_input: str) -> str:
         logger.log_event(
@@ -68,6 +100,7 @@ Rules:
                 "input": user_input,
                 "model": getattr(self.llm, "model_name", "unknown"),
                 "max_steps": self.max_steps,
+                "agent_version": self.agent_version,
             },
         )
 
@@ -180,8 +213,8 @@ Rules:
 
         if not final_answer:
             final_answer = (
-                "I could not complete the task within the maximum number of "
-                "reasoning steps. Please try again with a simpler request."
+                "Tôi chưa thể hoàn thành yêu cầu trong số bước tối đa. "
+                "Vui lòng thử lại với yêu cầu đơn giản hơn."
             )
 
             logger.log_event(
@@ -197,6 +230,7 @@ Rules:
             {
                 "steps": len(self.history),
                 "final_answer": final_answer,
+                "agent_version": self.agent_version,
             },
         )
 
@@ -300,7 +334,12 @@ Rules:
 
     def _strip_markdown_fences(self, text: str) -> str:
         text = text.strip()
-        text = re.sub(r"^```(?:json|python|text)?", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(
+            r"^```(?:json|python|text)?",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip()
         text = re.sub(r"```$", "", text).strip()
         return text
 
